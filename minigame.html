@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Snake — Mini Game (Single File)</title>
+<style>
+  :root{
+    --bg:#f8fafc;           /* light theme */
+    --card:#ffffff;
+    --ink:#0f172a;
+    --muted:#64748b;
+    --accent:#22c55e;       /* green */
+    --accent-2:#16a34a;
+    --grid:#e2e8f0;
+    --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:radial-gradient(1000px 700px at 10% -10%, #ffffff 0, var(--bg) 70%) fixed;
+    color:var(--ink);
+    font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji";
+    display:grid; place-items:center;
+  }
+  .wrap{
+    width:min(92vw, 780px);
+    display:grid; gap:14px;
+    padding:20px;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  h1{
+    font-size:clamp(22px, 3vw, 30px); margin:0; letter-spacing:.2px;
+    display:flex; align-items:center; gap:.5ch;
+  }
+  h1 .dot{display:inline-block; width:.6em; height:.6em; background:var(--accent); border-radius:50%;}
+  .panel{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+  }
+  .badge{
+    background:var(--card);
+    border:1px solid var(--grid);
+    border-radius:14px;
+    padding:6px 10px; font-weight:600; letter-spacing:.2px;
+    box-shadow:0 1px 0 rgba(2,6,23,0.05), 0 1px 10px rgba(2,6,23,0.06);
+  }
+  .btn{
+    appearance:none; border:1px solid var(--grid); background:var(--card); color:var(--ink);
+    padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer;
+    box-shadow:0 1px 0 rgba(2,6,23,0.05), 0 6px 18px rgba(2,6,23,0.07);
+    transition:transform .06s ease, box-shadow .2s ease, background .2s;
+  }
+  .btn:hover{transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn.primary{background:var(--accent); color:white; border-color:var(--accent-2)}
+  .btn.primary:hover{background:var(--accent-2)}
+  .grid-wrap{
+    background:var(--card); border:1px solid var(--grid); border-radius:18px; padding:14px;
+    box-shadow:0 6px 30px rgba(2,6,23,0.08);
+  }
+  canvas{
+    width:min(92vw, 720px); height:auto; aspect-ratio:1;
+    image-rendering:pixelated; border-radius:14px;
+    display:block; background:
+      linear-gradient(0deg, rgba(255,255,255,.5), rgba(255,255,255,.5)),
+      conic-gradient(from 45deg at 50% 50%, #f8fff9, #f2fff5);
+    border:1px solid var(--grid);
+  }
+  .help{
+    color:var(--muted); font-size:14px; display:flex; gap:14px; flex-wrap:wrap;
+  }
+  kbd{
+    background:#fff; border:1px solid var(--grid); border-bottom-width:2px; border-radius:6px;
+    padding:2px 6px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-weight:700;
+  }
+  .toast{
+    position:absolute; inset:0; display:grid; place-items:center; pointer-events:none;
+  }
+  .msg{
+    background:rgba(255,255,255,.85);
+    backdrop-filter:saturate(120%) blur(6px);
+    border:1px solid var(--grid); padding:14px 18px; border-radius:12px; font-weight:700;
+    box-shadow:0 8px 40px rgba(2,6,23,.15);
+    animation:pop .18s ease;
+  }
+  @keyframes pop{from{transform:scale(.96); opacity:0} to{transform:scale(1); opacity:1}}
+  footer{color:var(--muted); font-size:13px; text-align:center}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1><span class="dot"></span> Snake</h1>
+      <div class="panel">
+        <span class="badge">Score: <span id="score">0</span></span>
+        <span class="badge">Best: <span id="best">0</span></span>
+        <button id="btnStart" class="btn primary" aria-label="Start or Restart">Start / Restart</button>
+        <button id="btnPause" class="btn" aria-label="Pause or Resume">Pause</button>
+      </div>
+    </header>
+
+    <div class="grid-wrap" style="position:relative">
+      <canvas id="board" width="480" height="480" role="img" aria-label="Snake game board"></canvas>
+      <div class="toast" id="toast" hidden><div class="msg" id="toastText"></div></div>
+    </div>
+
+    <div class="help">
+      <div>Move: <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> or <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></div>
+      <div>Pause/Resume: <kbd>P</kbd> • Restart: <kbd>R</kbd></div>
+      <div>Mobile: swipe to steer</div>
+    </div>
+
+    <footer>
+      Built as a single HTML file. Have fun! 🐍
+    </footer>
+  </div>
+
+<script>
+(() => {
+  // --- Config ---
+  const CELL = 24;                 // cell size in px
+  const GRID = 20;                 // grid cells (GRID x GRID)
+  const BASE_SPEED_MS = 140;       // base tick
+  const SPEED_FASTER_EVERY = 4;    // speed up every N foods
+  const SPEED_STEP_MS = 6;         // reduce delay by this
+  const WALLS_WRAP = true;         // wrap around edges
+
+  // --- DOM refs ---
+  const cvs = document.getElementById('board');
+  const ctx = cvs.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl  = document.getElementById('best');
+  const btnStart= document.getElementById('btnStart');
+  const btnPause= document.getElementById('btnPause');
+  const toast   = document.getElementById('toast');
+  const toastText = document.getElementById('toastText');
+
+  // Scale canvas to match GRID * CELL
+  cvs.width = GRID * CELL;
+  cvs.height = GRID * CELL;
+
+  // --- Game state ---
+  let snake, dir, nextDir, food, score, best, loopId, paused, ateCount;
+
+  // High score
+  try { best = parseInt(localStorage.getItem('snakeHighScore')) || 0; } catch { best = 0; }
+  bestEl.textContent = best;
+
+  function reset() {
+    snake = [{x: Math.floor(GRID/2), y: Math.floor(GRID/2)}];
+    dir = {x:1, y:0};
+    nextDir = {...dir};
+    food = spawnFood();
+    score = 0; ateCount = 0; paused = false;
+    updateScore();
+    hideToast();
+    pump();
+  }
+
+  function tickDelay() {
+    const levels = Math.floor(ateCount / SPEED_FASTER_EVERY);
+    return Math.max(60, BASE_SPEED_MS - levels * SPEED_STEP_MS);
+  }
+
+  function spawnFood() {
+    let pos;
+    do {
+      pos = { x: (Math.random() * GRID) | 0, y: (Math.random() * GRID) | 0 };
+    } while (snake.some(s => s.x === pos.x && s.y === pos.y));
+    return pos;
+  }
+
+  function drawGrid() {
+    ctx.clearRect(0,0,cvs.width,cvs.height);
+    // soft grid
+    ctx.save();
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid').trim() || '#e2e8f0';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = .6;
+    for (let i=1;i<GRID;i++){
+      const v = i*CELL;
+      ctx.beginPath(); ctx.moveTo(v,0); ctx.lineTo(v,cvs.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,v); ctx.lineTo(cvs.width,v); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFood() {
+    ctx.save();
+    // food shadow
+    ctx.fillStyle = 'rgba(34,197,94,.15)';
+    ctx.fillRect(food.x*CELL, food.y*CELL, CELL, CELL);
+    // food square
+    const pad = 4;
+    ctx.fillStyle = '#16a34a';
+    roundRect(ctx, food.x*CELL+pad, food.y*CELL+pad, CELL-2*pad, CELL-2*pad, 6, true, false);
+    ctx.restore();
+  }
+
+  function drawSnake() {
+    ctx.save();
+    snake.forEach((s, i) => {
+      const px = s.x*CELL, py = s.y*CELL;
+      const head = i === 0;
+      // body
+      ctx.fillStyle = head ? '#0ea5e9' : '#38bdf8';
+      roundRect(ctx, px+3, py+3, CELL-6, CELL-6, 8, true, false);
+      // head eyes
+      if (head) {
+        ctx.fillStyle = '#0f172a';
+        const ex = px + CELL/2 + (dir.x*3);
+        const ey = py + CELL/2 + (dir.y*3);
+        ctx.beginPath(); ctx.arc(ex-4, ey-4, 2.2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(ex+4, ey+4, 2.2, 0, Math.PI*2); ctx.fill();
+      }
+    });
+    ctx.restore();
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke){
+    if (typeof r === 'number') r = {tl:r,tr:r,br:r,bl:r};
+    ctx.beginPath();
+    ctx.moveTo(x+r.tl, y);
+    ctx.lineTo(x+w-r.tr, y);
+    ctx.quadraticCurveTo(x+w, y, x+w, y+r.tr);
+    ctx.lineTo(x+w, y+h-r.br);
+    ctx.quadraticCurveTo(x+w, y+h, x+w-r.br, y+h);
+    ctx.lineTo(x+r.bl, y+h);
+    ctx.quadraticCurveTo(x, y+h, x, y+h-r.bl);
+    ctx.lineTo(x, y+r.tl);
+    ctx.quadraticCurveTo(x, y, x+r.tl, y);
+    ctx.closePath();
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  function updateScore() {
+    scoreEl.textContent = score;
+    if (score > best) {
+      best = score;
+      bestEl.textContent = best;
+      try { localStorage.setItem('snakeHighScore', best); } catch {}
+    }
+  }
+
+  function gameOver() {
+    stopLoop();
+    showToast(`Game Over! Score: ${score} — press R or Start`);
+  }
+
+  function pump() {
+    stopLoop();
+    loopId = setTimeout(() => {
+      if (!paused) step();
+      pump(); // schedule next
+    }, tickDelay());
+  }
+
+  function stopLoop() {
+    if (loopId) clearTimeout(loopId);
+    loopId = null;
+  }
+
+  function step() {
+    // apply buffered direction
+    dir = nextDir;
+
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    // wall behavior
+    if (WALLS_WRAP) {
+      head.x = (head.x + GRID) % GRID;
+      head.y = (head.y + GRID) % GRID;
+    } else {
+      if (head.x < 0 || head.y < 0 || head.x >= GRID || head.y >= GRID) return gameOver();
+    }
+
+    // self collision
+    if (snake.some(s => s.x === head.x && s.y === head.y)) return gameOver();
+
+    // move
+    snake.unshift(head);
+
+    // eat
+    if (head.x === food.x && head.y === food.y) {
+      score += 10; ateCount++;
+      updateScore();
+      food = spawnFood();
+    } else {
+      snake.pop();
+    }
+
+    // draw
+    drawGrid();
+    drawFood();
+    drawSnake();
+  }
+
+  function setDirection(nx, ny) {
+    // prevent reversing into self
+    if (snake.length > 1 && nx === -dir.x && ny === -dir.y) return;
+    nextDir = {x:nx, y:ny};
+  }
+
+  // --- Input ---
+  window.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+    if (k === 'arrowup' || k === 'w') setDirection(0,-1);
+    else if (k === 'arrowdown' || k === 's') setDirection(0,1);
+    else if (k === 'arrowleft' || k === 'a') setDirection(-1,0);
+    else if (k === 'arrowright' || k === 'd') setDirection(1,0);
+    else if (k === 'p') togglePause();
+    else if (k === 'r') reset();
+  }, {passive:true});
+
+  // Touch / swipe
+  let touchStart = null;
+  cvs.addEventListener('touchstart', (e) => {
+    if (!e.touches || e.touches.length === 0) return;
+    const t = e.touches[0];
+    touchStart = {x:t.clientX, y:t.clientY, time: Date.now()};
+  }, {passive:true});
+  cvs.addEventListener('touchmove', (e) => {
+    // prevent page scroll when swiping on canvas
+    if (touchStart) e.preventDefault();
+  }, {passive:false});
+  cvs.addEventListener('touchend', (e) => {
+    if (!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x;
+    const dy = t.clientY - touchStart.y;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    const TH = 18; // threshold px
+    if (adx > ady && adx > TH) {
+      setDirection(dx > 0 ? 1 : -1, 0);
+    } else if (ady > TH) {
+      setDirection(0, dy > 0 ? 1 : -1);
+    }
+    touchStart = null;
+  }, {passive:true});
+
+  // Buttons
+  btnStart.addEventListener('click', reset);
+  btnPause.addEventListener('click', togglePause);
+
+  function togglePause() {
+    paused = !paused;
+    btnPause.textContent = paused ? 'Resume' : 'Pause';
+    showToast(paused ? 'Paused' : 'Resume');
+  }
+
+  // Toast helpers
+  let toastTimer = null;
+  function showToast(text) {
+    toastText.textContent = text;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { hideToast(); }, 1200);
+  }
+  function hideToast() {
+    toast.hidden = true;
+  }
+
+  // First paint
+  drawGrid();
+  // Idle snake preview
+  (function preview() {
+    ctx.save();
+    ctx.globalAlpha = .7;
+    ctx.fillStyle = '#38bdf8';
+    const cx = Math.floor(GRID/2), cy = Math.floor(GRID/2);
+    roundRect(ctx, cx*CELL+3, cy*CELL+3, CELL-6, CELL-6, 8, true, false);
+    ctx.restore();
+    drawFood();
+  })();
+})();
+</script>
+</body>
+</html>
